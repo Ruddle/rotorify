@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useEffect, useRef } from "react";
-import { useAnimationFrame } from "./utils";
+import { clamp, useAnimationFrame } from "./utils";
 
 let Ammo = window.Ammo;
 
@@ -65,7 +65,7 @@ function init(canvas) {
   dirLight.shadow.mapSize.width = 2048;
   dirLight.shadow.mapSize.height = 2048;
 
-  let d = 50;
+  let d = 10;
 
   dirLight.shadow.camera.left = -d;
   dirLight.shadow.camera.right = d;
@@ -166,29 +166,48 @@ function createDrone({ physicsWorld, scene, rigidBodies, droneData }) {
       new THREE.MeshPhongMaterial({ color: 0xff0505 })
     );
     ball1.position.set(mcd_meters, 0, 0);
+    ball1.castShadow = true;
+    ball.add(ball1);
 
     let ball2 = new THREE.Mesh(
       new THREE.SphereBufferGeometry(radius),
       new THREE.MeshPhongMaterial({ color: 0xff0505 })
     );
     ball2.position.set(-mcd_meters, 0, 0);
+    ball2.castShadow = true;
+    ball.add(ball2);
 
     let ball3 = new THREE.Mesh(
       new THREE.SphereBufferGeometry(radius),
       new THREE.MeshPhongMaterial({ color: 0xff0505 })
     );
     ball3.position.set(0, 0, -mcd_meters);
+    ball3.castShadow = true;
+    ball.add(ball3);
 
     let ball4 = new THREE.Mesh(
       new THREE.SphereBufferGeometry(radius),
       new THREE.MeshPhongMaterial({ color: 0xff0505 })
     );
     ball4.position.set(0, 0, mcd_meters);
-
-    ball.add(ball1);
-    ball.add(ball2);
-    ball.add(ball3);
+    ball4.castShadow = true;
     ball.add(ball4);
+
+    let rod1 = new THREE.Mesh(
+      new THREE.BoxBufferGeometry(radius / 2, radius / 2, mcd_meters * 2),
+      new THREE.MeshPhongMaterial({ color: 0x000000 })
+    );
+    rod1.position.set(0, 0, 0);
+    rod1.castShadow = true;
+    ball.add(rod1);
+
+    let rod2 = new THREE.Mesh(
+      new THREE.BoxBufferGeometry(mcd_meters * 2, radius / 2, radius / 2),
+      new THREE.MeshPhongMaterial({ color: 0x000000 })
+    );
+    rod2.position.set(0, 0, 0);
+    rod2.castShadow = true;
+    ball.add(rod2);
   }
 
   ball.position.set(pos.x, pos.y, pos.z);
@@ -205,7 +224,13 @@ function createDrone({ physicsWorld, scene, rigidBodies, droneData }) {
   transform.setRotation(new Ammo.btQuaternion(quat.x, quat.y, quat.z, quat.w));
   let motionState = new Ammo.btDefaultMotionState(transform);
 
-  let colShape = new Ammo.btSphereShape(droneData.motorCenterDistance / 1000);
+  let colShape = new Ammo.btBoxShape(
+    new Ammo.btVector3(
+      droneData.motorCenterDistance / 1000,
+      2 / 100,
+      droneData.motorCenterDistance / 1000
+    )
+  );
   colShape.setMargin(0.05);
 
   let localInertia = new Ammo.btVector3(0, 0, 0);
@@ -257,36 +282,90 @@ function updatePhysics(
 ) {
   // Step world
 
-  if (droneData)
-    for (let step = 0; step < deltaTime; step++) {
+  let startTime = performance.now();
+  sim.deltaToSim = deltaTime;
+  sim.simTime = 0;
+  if (droneData) {
+    function simulateOneStep() {
       physicsWorld.stepSimulation(1 / 1000.0, 0);
 
-      let batteryDrain =
-        (sim.throttle * (100 * (droneData.batteryC * (1 / 1000)))) / 3600;
-      sim.battery = Math.max(0, sim.battery - batteryDrain);
-
-      let jouleCons = (batteryDrain / 100) * droneData.j;
-      let wattCons = jouleCons / 0.001;
-      let lift = droneData.motorLiftPerWatt * wattCons;
       let drone = rigidBodies[0];
       let droneAmmo = drone.userData.physicsBody;
-      let liftVec = new Ammo.btVector3(0, lift / 1000, 0);
+      droneAmmo.getMotionState().getWorldTransform(tmpTrans);
+      let [x, y, z] = [
+        tmpTrans.getOrigin().x(),
+        tmpTrans.getOrigin().y(),
+        tmpTrans.getOrigin().z(),
+      ];
+      let [vx, vy, vz] = [
+        droneAmmo.getLinearVelocity().x(),
+        droneAmmo.getLinearVelocity().y(),
+        droneAmmo.getLinearVelocity().z(),
+      ];
 
-      droneAmmo.applyImpulse(liftVec, new Ammo.btVector3(0, 0, 0));
-      sim.ms += 1;
+      if (sim.stage === "training.pid.alt") {
+        {
+          //RESET ORIENTATION
+          droneAmmo.getMotionState().getWorldTransform(tmpTrans);
+          let quat = { x: 0, y: 0, z: 0, w: 1 };
+          let q = new Ammo.btQuaternion(quat.x, quat.y, quat.z, quat.w);
+          tmpTrans.setRotation(q);
+          Ammo.destroy(q);
+          droneAmmo.getMotionState().setWorldTransform(tmpTrans);
+        }
+
+        let altErr = 3 - y;
+
+        sim.pids.alt.accI = sim.pids.alt.accI * 0.9 + altErr * 0.1;
+
+        sim.throttle = clamp(
+          sim.pids.alt.p * altErr -
+            sim.pids.alt.d * vy +
+            sim.pids.alt.i * sim.pids.alt.accI,
+          0,
+          1
+        );
+      }
+
+      {
+        let batteryDrain =
+          (sim.throttle * (100 * (droneData.batteryC * (1 / 1000)))) / 3600;
+
+        let oldBattery = sim.battery;
+        sim.battery = Math.max(0, sim.battery - batteryDrain);
+        batteryDrain = oldBattery - sim.battery;
+        let jouleCons = (batteryDrain / 100) * droneData.j;
+        let wattCons = jouleCons / 0.001;
+        let lift = droneData.motorLiftPerWatt * wattCons;
+
+        let liftVec = new Ammo.btVector3(0, lift / 1000, 0);
+        let relPos = new Ammo.btVector3(0, 0, 0);
+        droneAmmo.applyImpulse(liftVec, relPos);
+        Ammo.destroy(liftVec);
+        Ammo.destroy(relPos);
+      }
 
       if (sim.ms % 30 === 0) {
         sim.batteryChart.push(sim.battery);
-        droneAmmo.getMotionState().getWorldTransform(tmpTrans);
-        let y = tmpTrans.getOrigin().y();
         sim.yChart.push(y);
-        let vy = droneAmmo.getLinearVelocity().y();
-
         sim.vyChart.push(vy);
       }
-    }
-  // physicsWorld.stepSimulation(deltaTime / 1000.0, 10000, 1 / 1000);
 
+      sim.ms += 1;
+    }
+
+    if (sim.stage === "free") {
+      for (let step = 0; step < deltaTime; step++) {
+        simulateOneStep();
+      }
+    } else {
+      while (sim.simTime + 1 < sim.deltaToSim && sim.simTime + 1 < 33) {
+        simulateOneStep();
+        sim.simTime = performance.now() - startTime;
+      }
+    }
+  }
+  sim.simTime = performance.now() - startTime;
   // Update rigid bodies
   for (let i = 0; i < rigidBodies.length; i++) {
     let objThree = rigidBodies[i];
@@ -331,8 +410,21 @@ const INITIAL_SIM_DATA = () => {
     vyChart: [],
     throttle: 0,
     ms: 0,
+    stage: "free",
+    pids: {
+      alt: {
+        p: 1,
+        i: 20,
+        d: 1.9,
+
+        accI: [],
+      },
+    },
+    simTime: 0,
+    deltaToSim: 0,
   };
 };
+
 function computeTotalMass(drone) {
   return {
     totalMass:
@@ -439,8 +531,10 @@ export default function EditorFrag() {
             flexDirection: "column",
           }}
         >
-          <div> {simData.ms + "ms"}</div>
-          <div> {simData.battery.toFixed(2) + "%"}</div>
+          <div> {simData.ms.toFixed(2) + "ms"}</div>
+          <div> {simData.simTime.toFixed(2) + "ms"}</div>
+          <div> {simData.deltaToSim.toFixed(2) + "ms"}</div>
+
           <Chart
             name={"battery"}
             arrf={() => stateRef.current?.sim?.batteryChart}
@@ -686,6 +780,7 @@ function Chart({ arrf, name }) {
   let ref = useRef();
 
   let stateRef = useRef(INIT_CHART());
+  let [current, setCurrent] = useState(0);
   let w = 200;
   let h = 200;
   useAnimationFrame((dt) => {
@@ -702,8 +797,10 @@ function Chart({ arrf, name }) {
     let ctx = ref.current.getContext("2d");
     ctx.width = w;
     ctx.height = h;
-    ctx.fillStyle = "rgba(0,0,0,0.6)";
+    ctx.fillStyle = "rgba(0,0,0,0.2)";
     ctx.fillRect(0, 0, w, h);
+
+    if (arr.length > 0) setCurrent(arr[arr.length - 1]);
 
     for (let i = state.lastComputeIndex + 1; i < arr.length; i++) {
       state.min = Math.min(state.min, arr[i]);
@@ -729,11 +826,13 @@ function Chart({ arrf, name }) {
     <div
       style={{
         border: "1px solid black",
-        background: "rgba(0,0,0,0.8)",
+        background: "rgba(0,0,0,0.6)",
         color: "white",
       }}
     >
-      <div>{name}</div>
+      <div>
+        {name}: {current.toFixed(2)}
+      </div>
       <canvas ref={ref} style={{ width: w + "px", height: h + "px" }}></canvas>
     </div>
   );
