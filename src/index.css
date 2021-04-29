@@ -1,0 +1,17 @@
+* {
+  font-family: "Droid Sans Mono", monospace, monospace, "Droid Sans Fallback";
+}
+
+body {
+  margin: 0;
+
+  font-family: "Droid Sans Mono", monospace, monospace, "Droid Sans Fallback";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: #789;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, "Courier New",
+    monospace;
+}
