@@ -10,6 +10,14 @@ import {
 
 let Ammo = window.Ammo;
 
+/**
+ * @template T
+ * @typedef  {T extends Promise<infer Value> ? Value : T} PromiseValue
+ */
+
+/** @type {PromiseValue<import('@dimforge/rapier3d')>} */
+var RAPIER;
+
 const THREE = require("three");
 
 // const { GLTFLoader } = require("three/examples/jsm/loaders/GLTFLoader");
@@ -846,11 +854,13 @@ export default function EditorFrag() {
       setDroneComputed(true);
     }
   }, [droneData, droneComputed]);
+
   useEffect(() => {
     async function test() {
       console.log("Trying to load Ammo.js");
       try {
         Ammo = await Ammo();
+        RAPIER = await import("@dimforge/rapier3d");
 
         stateRef.current = init(canvasRef.current);
         stateRef.current.physicsWorld = setupPhysicsWorld();
