@@ -1,7 +1,7 @@
 {
   "name": "rotorify",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.2.0",
+  "private": false,
   "homepage": "https://ruddle.github.io/rotorify",
   "dependencies": {
     "@monaco-editor/react": "^4.0.11",

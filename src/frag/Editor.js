@@ -12,7 +12,7 @@ let Ammo = window.Ammo;
 
 const THREE = require("three");
 
-const { GLTFLoader } = require("three/examples/jsm/loaders/GLTFLoader");
+// const { GLTFLoader } = require("three/examples/jsm/loaders/GLTFLoader");
 
 const qs = require("query-string");
 var cloneDeep = require("lodash.clonedeep");
@@ -104,7 +104,7 @@ const INITIAL_SIM_DATA = () => {
     camera: {
       position: [-4, 1.7, 0],
       lookAt: [0, 1.7, 0],
-      followPos: true,
+      followPos: false,
       followLook: true,
     },
   };
@@ -133,17 +133,17 @@ function init(canvas) {
   camera.position.set(-4, 1.7, 0);
   camera.lookAt(new THREE.Vector3(0, 1.7, 0));
 
-  let loader = new GLTFLoader();
-  loader.load(
-    process.env.PUBLIC_URL + "/static/coords.gltf",
-    (gltf) => {
-      scene.add(gltf.scene);
-    },
-    () => {},
-    (error) => {
-      console.error(error);
-    }
-  );
+  // let loader = new GLTFLoader();
+  // loader.load(
+  //   process.env.PUBLIC_URL + "/static/coords.gltf",
+  //   (gltf) => {
+  //     scene.add(gltf.scene);
+  //   },
+  //   () => {},
+  //   (error) => {
+  //     console.error(error);
+  //   }
+  // );
 
   //Add hemisphere light
   let hemiLight = new THREE.HemisphereLight(0xffffff, 0xffffff, 0.1);
@@ -564,7 +564,7 @@ function updatePhysics(state, deltaTime) {
         }
 
         contrib.forEach((motor, index) => {
-          let commandPower = clamp(t + motor, 0, 1);
+          let commandPower = clamp(sim.throttle + t + motor, 0, 1);
           let batteryDrain =
             (0.25 *
               (commandPower * (100 * (droneData.batteryC * (1 / 1000))))) /
